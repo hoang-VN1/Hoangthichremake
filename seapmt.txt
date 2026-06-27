@@ -1,0 +1,548 @@
+local player = game.Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local BOAT_NAME = "Guardian"
+local SEA_ZONE = "Lv Infinite"
+local TWEEN_SPEED = 325
+
+local SEA_ZONE_CFRAMES = {
+    ["Lv 1"]        = CFrame.new(-21998.375,  35, -682.309143),
+    ["Lv 2"]        = CFrame.new(-26779.5215, 35, -822.858032),
+    ["Lv 3"]        = CFrame.new(-31171.957,  35, -2256.93774),
+    ["Lv 4"]        = CFrame.new(-34054.6875, 35, -2560.12012),
+    ["Lv 5"]        = CFrame.new(-38887.5547, 35, -2162.99023),
+    ["Lv 6"]        = CFrame.new(-44541.7617, 35, -1244.8584),
+    ["Lv Infinite"] = CFrame.new(-10000000,   35,  37016.25),
+}
+
+local noclipConn, bvLoopConn, boatNoclipConn, boatBvConn
+local activeTween, boatTweenConn, boatTweenRunning
+
+local function SetNoclip(on)
+    if on then
+        if noclipConn then return end
+        noclipConn = RunService.Stepped:Connect(function()
+            local char = player.Character
+            if not char then return end
+            for _, v in ipairs(char:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = false end
+            end
+        end)
+    else
+        if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+    end
+end
+
+local function SetBodyVelocity(on)
+    if on then
+        if bvLoopConn then return end
+        bvLoopConn = RunService.Heartbeat:Connect(function()
+            local char = player.Character
+            if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return end
+            local bv = hrp:FindFirstChild("SeaBV")
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "SeaBV"
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.MaxForce = Vector3.new(0, math.huge, 0)
+                bv.P = 9999
+                bv.Parent = hrp
+            end
+        end)
+    else
+        if bvLoopConn then bvLoopConn:Disconnect() bvLoopConn = nil end
+        local char = player.Character
+        if char then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local bv = hrp:FindFirstChild("SeaBV")
+                if bv then bv:Destroy() end
+            end
+        end
+    end
+end
+
+local function TweenPlayer(targetCF, callback)
+    if activeTween then activeTween:Cancel() activeTween = nil end
+    local char = player.Character
+    if not char then if callback then callback() end return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then if callback then callback() end return end
+    SetBodyVelocity(true)
+    local dist = (hrp.Position - targetCF.Position).Magnitude
+    local speed = TWEEN_SPEED
+    local duration = math.max(0.05, dist / speed)
+    local tw = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCF})
+    activeTween = tw
+    tw:Play()
+    tw.Completed:Connect(function(state)
+        if state == Enum.PlaybackState.Completed then
+            activeTween = nil
+            if callback then callback() end
+        end
+    end)
+    return tw
+end
+
+local function TweenPlayerSync(targetCF)
+    local done = false
+    TweenPlayer(targetCF, function() done = true end)
+    while not done do task.wait() end
+end
+
+local function GetMyBoat()
+    local char = player.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local boatsFolder = workspace:FindFirstChild("Boats")
+    if not boatsFolder then return nil end
+    local bestBoat, bestDist = nil, 3500
+    for _, boat in ipairs(boatsFolder:GetChildren()) do
+        local owner = boat:FindFirstChild("Owner")
+        if not owner then continue end
+        local ok, result = pcall(function() return tostring(owner.Value) end)
+        if not ok or result ~= player.Name then continue end
+        local seat = boat:FindFirstChildWhichIsA("VehicleSeat", true)
+        if not seat then continue end
+        local dist = (seat.Position - hrp.Position).Magnitude
+        if dist <= bestDist then
+            bestDist = dist
+            bestBoat = boat
+        end
+    end
+    return bestBoat
+end
+
+local function IsOnBoat()
+    local char = player.Character
+    if not char then return false end
+    local hum = char:FindFirstChild("Humanoid")
+    return hum and hum.Sit
+end
+
+local function ForceSitOnBoat(boat)
+    if not boat then return false end
+    local seat = boat:FindFirstChildWhichIsA("VehicleSeat", true)
+    if not seat then return false end
+    local char = player.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local dist = (hrp.Position - seat.Position).Magnitude
+    if dist > 10 then
+        TweenPlayerSync(seat.CFrame * CFrame.new(0, 2.5, 0))
+    end
+    task.wait(0.3)
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then seat:Sit(hum) end
+    task.wait(0.6)
+    return IsOnBoat()
+end
+
+local function TweenBoatTo(boat, targetCF, callback)
+    boatTweenRunning = false
+    if boatTweenConn then boatTweenConn:Disconnect() boatTweenConn = nil end
+    if not boat or not boat.Parent then if callback then callback() end return end
+    local startCF = boat:GetPivot()
+    local dist = (startCF.Position - targetCF.Position).Magnitude
+    local duration = math.max(0.05, dist / TWEEN_SPEED)
+    local startT = tick()
+    boatTweenRunning = true
+    boatTweenConn = RunService.Heartbeat:Connect(function()
+        if not boatTweenRunning or not boat or not boat.Parent then
+            if boatTweenConn then boatTweenConn:Disconnect() boatTweenConn = nil end
+            return
+        end
+        if not IsOnBoat() then
+            boatTweenRunning = false
+            if boatTweenConn then boatTweenConn:Disconnect() boatTweenConn = nil end
+            if callback then callback() end
+            return
+        end
+        local alpha = math.clamp((tick() - startT) / duration, 0, 1)
+        local lerpedCF = startCF:Lerp(targetCF, alpha)
+        pcall(function() boat:PivotTo(lerpedCF) end)
+        if alpha >= 1 then
+            boatTweenRunning = false
+            boatTweenConn:Disconnect()
+            boatTweenConn = nil
+            if callback then callback() end
+        end
+    end)
+end
+
+local function TweenBoatToSync(boat, targetCF)
+    local done = false
+    TweenBoatTo(boat, targetCF, function() done = true end)
+    while not done and boatTweenRunning do
+        if not IsOnBoat() then break end
+        task.wait()
+    end
+end
+
+local function SetBoatNoclip(boat, on)
+    if on then
+        if boatNoclipConn then boatNoclipConn:Disconnect() end
+        boatNoclipConn = RunService.Stepped:Connect(function()
+            if not boat or not boat.Parent then
+                boatNoclipConn:Disconnect() boatNoclipConn = nil
+                return
+            end
+            for _, p in ipairs(boat:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = false end
+            end
+        end)
+    else
+        if boatNoclipConn then boatNoclipConn:Disconnect() boatNoclipConn = nil end
+    end
+end
+
+local function SetBoatBV(boat, on)
+    if on then
+        if boatBvConn then boatBvConn:Disconnect() end
+        boatBvConn = RunService.Heartbeat:Connect(function()
+            if not boat or not boat.Parent then
+                boatBvConn:Disconnect() boatBvConn = nil
+                return
+            end
+            local root = boat:FindFirstChild("Engine") or boat.PrimaryPart or boat:FindFirstChildWhichIsA("VehicleSeat", true)
+            if not root then return end
+            local bv = root:FindFirstChild("BoatBV")
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "BoatBV"
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.MaxForce = Vector3.new(0, math.huge, 0)
+                bv.P = 9999
+                bv.Parent = root
+            end
+        end)
+    else
+        if boatBvConn then boatBvConn:Disconnect() boatBvConn = nil end
+        if boat and boat.Parent then
+            local root = boat:FindFirstChild("Engine") or boat.PrimaryPart
+            if root then
+                local bv = root:FindFirstChild("BoatBV")
+                if bv then bv:Destroy() end
+            end
+        end
+    end
+end
+
+local function CancelBoatTween()
+    boatTweenRunning = false
+    if boatTweenConn then boatTweenConn:Disconnect() boatTweenConn = nil end
+end
+
+local function weaponSc(tooltip)
+    local char = player.Character
+    if not char then return end
+    local eq = char:FindFirstChildOfClass("Tool")
+    if eq and eq.ToolTip == tooltip then return end
+    for _, v in ipairs(player.Backpack:GetChildren()) do
+        if v.ToolTip == tooltip then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum:EquipTool(v) end
+            return
+        end
+    end
+end
+
+local WEAPON_SKILLS = {
+    ["Melee"] = {"Z","X","C"},
+    ["Sword"] = {"Z","X"},
+    ["Blox Fruit"] = {"Z","X","C"},
+    ["Gun"] = {"Z","X"},
+}
+
+local function skillSpam(stopFn)
+    local prev = nil
+    local weapons = {"Melee","Sword","Blox Fruit","Gun"}
+    while not stopFn() do
+        local chosen = weapons[math.random(#weapons)]
+        if chosen == prev then chosen = weapons[math.random(#weapons)] end
+        prev = chosen
+        weaponSc(chosen)
+        local skills = WEAPON_SKILLS[chosen]
+        if not skills then task.wait(0.3) continue end
+        local start = tick()
+        local i = 1
+        while tick() - start < 0.3 and not stopFn() do
+            pcall(function()
+                VirtualInputManager:SendKeyEvent(true, skills[i], false, game)
+                VirtualInputManager:SendKeyEvent(false, skills[i], false, game)
+            end)
+            i = i % #skills + 1
+            task.wait(0.1)
+        end
+    end
+end
+
+local function isMobUsingSkill(mob)
+    if not mob then return false end
+    local humanoid = mob:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return false end
+    local tracks = animator:GetPlayingAnimationTracks()
+    for _, track in ipairs(tracks) do
+        if track.Animation and track.Animation.AnimationId == "rbxassetid://8708221792" then
+            return true
+        end
+    end
+    return false
+end
+
+local function getAllSeaBeasts()
+    local all = {}
+    local folder = workspace:FindFirstChild("SeaBeasts")
+    if not folder then return all end
+    local char = player.Character
+    if not char then return all end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return all end
+    for _, mob in ipairs(folder:GetChildren()) do
+        if mob.Name == "SeaBeast" or mob.Name == "SeaBeast1" then
+            local hp = mob:FindFirstChild("Health")
+            if hp and hp.Value > 0 then
+                local rp = mob:FindFirstChild("HumanoidRootPart")
+                if rp then
+                    local dist = (rp.Position - hrp.Position).Magnitude
+                    if dist <= 2000 then
+                        table.insert(all, {mob = mob, dist = dist})
+                    end
+                end
+            end
+        end
+    end
+    table.sort(all, function(a, b) return a.dist < b.dist end)
+    return all
+end
+
+local function isMobAlive(mob)
+    if not mob or not mob.Parent then return false end
+    local hp = mob:FindFirstChild("Health")
+    return hp and hp.Value > 0
+end
+
+local function farmSingleMob(mob)
+    SetNoclip(true)
+    SetBodyVelocity(true)
+
+    local stopFn = function()
+        return not isMobAlive(mob)
+    end
+
+    local spamThread = task.spawn(skillSpam, stopFn)
+
+    while not stopFn() do
+        local rp = mob:FindFirstChild("HumanoidRootPart")
+        if rp then
+            local targetY = 35
+            if isMobUsingSkill(mob) then
+                targetY = 75
+            end
+            TweenPlayer(CFrame.new(rp.Position.X, targetY, rp.Position.Z))
+        end
+        task.wait(0.1)
+    end
+
+    task.cancel(spamThread)
+    if activeTween then activeTween:Cancel() activeTween = nil end
+    SetNoclip(false)
+    SetBodyVelocity(false)
+end
+
+local function farmAllNearbySeaBeasts()
+    local seaBeasts = getAllSeaBeasts()
+    if #seaBeasts == 0 then return false end
+
+    if IsOnBoat() then
+        local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        task.wait(0.6)
+    end
+
+    for _, entry in ipairs(seaBeasts) do
+        if not isMobAlive(entry.mob) then continue end
+        farmSingleMob(entry.mob)
+        task.wait(0.5)
+    end
+
+    return true
+end
+
+local function ResetCharacter()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then hum.Health = 0 end
+end
+
+local function laycfnpc(name)
+    name = tostring(name):lower()
+        :gsub("%b()", "")
+        :gsub("%b[]", "")
+        :gsub("%s+", "")
+
+    for _,v in pairs({
+        workspace:GetDescendants(),
+        ReplicatedStorage:FindFirstChild("NPCs") and ReplicatedStorage.NPCs:GetChildren()
+    }) do
+        for _,x in pairs(v or {}) do
+            local n = tostring(x.Name):lower()
+                :gsub("%b()", "")
+                :gsub("%b[]", "")
+                :gsub("%s+", "")
+
+            local r = x:IsA("Model") and (
+                x:FindFirstChild("HumanoidRootPart")
+                or x.PrimaryPart
+            )
+
+            if r and n == name then
+                return r.CFrame
+            end
+        end
+    end
+    local ok,npc = pcall(require, ReplicatedStorage:FindFirstChild("NPCManager"))
+    if ok and npc and npc.NPCList then
+        for _,v in pairs(npc.NPCList) do
+            local n = tostring(v.Name):lower()
+                :gsub("%b()", "")
+                :gsub("%b[]", "")
+                :gsub("%s+", "")
+
+            if n == name then
+                if typeof(v) == "Instance" then
+                    local r = v:FindFirstChild("HumanoidRootPart") or v.PrimaryPart
+                    if r then
+                        return r.CFrame
+                    end
+                elseif type(v) == "table" and v.Position then
+                    return CFrame.new(v.Position)
+                end
+            end
+        end
+    end
+end
+
+local SeaBeastHunter = {
+    running = false,
+    mainThread = nil,
+}
+
+function SeaBeastHunter.mainLoop()
+    while SeaBeastHunter.running do
+        local farmed = farmAllNearbySeaBeasts()
+        if farmed then
+            task.wait(1)
+            continue
+        end
+
+        local myBoat = GetMyBoat()
+        if not myBoat then
+            ResetCharacter()
+            task.wait(4)
+            local dealerCF = laycfnpc("Boat Dealer")
+            if dealerCF then
+                TweenPlayerSync(dealerCF)
+                task.wait(0.5)
+                pcall(function()
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("BuyBoat", BOAT_NAME)
+                end)
+                task.wait(2)
+                myBoat = GetMyBoat()
+                if not myBoat then task.wait(2) continue end
+            else
+                task.wait(2)
+                continue
+            end
+        end
+
+        if not IsOnBoat() then
+            local seated = ForceSitOnBoat(myBoat)
+            if not seated then task.wait(1) continue end
+        end
+
+        local targetSeaCF = SEA_ZONE_CFRAMES[SEA_ZONE] or SEA_ZONE_CFRAMES["Lv 1"]
+        SetBoatNoclip(myBoat, true)
+        SetBoatBV(myBoat, true)
+
+        local startPos = myBoat:GetPivot().Position
+        local endPos = targetSeaCF.Position
+        local totalDist = (endPos - startPos).Magnitude
+        local steps = math.max(1, math.ceil(totalDist / 500))
+
+        local interrupted = false
+        for i = 1, steps do
+            if not IsOnBoat() then
+                CancelBoatTween()
+                interrupted = true
+                break
+            end
+
+            local t = i / steps
+            local stepPos = startPos + (endPos - startPos) * t
+            local stepCF = CFrame.new(stepPos.X, math.max(stepPos.Y, 35), stepPos.Z)
+            TweenBoatToSync(myBoat, stepCF)
+
+            if not IsOnBoat() then
+                CancelBoatTween()
+                interrupted = true
+                break
+            end
+
+            if #getAllSeaBeasts() > 0 then
+                CancelBoatTween()
+                interrupted = true
+                break
+            end
+        end
+
+        SetBoatNoclip(myBoat, false)
+        SetBoatBV(myBoat, false)
+
+        if interrupted then
+            task.wait(0.5)
+            continue
+        end
+
+        task.wait(3)
+    end
+end
+
+function SeaBeastHunter.Start()
+    if SeaBeastHunter.running then return end
+    SeaBeastHunter.running = true
+    SeaBeastHunter.mainThread = task.spawn(SeaBeastHunter.mainLoop)
+end
+
+function SeaBeastHunter.Stop()
+    SeaBeastHunter.running = false
+    if SeaBeastHunter.mainThread then
+        task.cancel(SeaBeastHunter.mainThread)
+        SeaBeastHunter.mainThread = nil
+    end
+    if activeTween then activeTween:Cancel() activeTween = nil end
+    CancelBoatTween()
+    SetNoclip(false)
+    SetBodyVelocity(false)
+    if boatNoclipConn then boatNoclipConn:Disconnect() boatNoclipConn = nil end
+    if boatBvConn then boatBvConn:Disconnect() boatBvConn = nil end
+end
+
+function SeaBeastHunter.IsRunning()
+    return SeaBeastHunter.running
+end
+
+SeaBeastHunter.Start()
