@@ -1,0 +1,211 @@
+--[[ 
+    SCRIPT LẤY KEY - CHỈ GỬI IPA KHI BẤM NÚT "GET KEY"
+]]
+
+local Web_URL = "https://depzaihub.vercel.app"  -- Thay bằng URL web của bạn
+local KeyCacheFile = "DeviceKeyCache.txt"
+
+-- === TẠO IPA DUY NHẤT (ẨN) ===
+local function generateIPA()
+    local player = game:GetService("Players").LocalPlayer
+    local userId = player.UserId
+    local gameId = game.GameId
+    local random = math.random(10000, 99999)
+    local ipa = string.sub(tostring(userId) .. tostring(gameId) .. tostring(random), 1, 12)
+    return ipa:upper()
+end
+
+-- === LẤY IPA ĐÃ LƯU ===
+local function getDeviceIPA()
+    if readfile and isfile and isfile(KeyCacheFile) then
+        local saved = readfile(KeyCacheFile)
+        if saved and #saved >= 6 then
+            return saved
+        end
+    end
+    local newIPA = generateIPA()
+    if writefile then
+        pcall(function() writefile(KeyCacheFile, newIPA) end)
+    end
+    return newIPA
+end
+
+-- === GỬI IPA LÊN WEB VÀ LẤY KEY (CHỈ GỌI KHI BẤM NÚT) ===
+local function fetchKeyFromWeb(ipa)
+    local fullURL = Web_URL .. "?action=getkey&ipa=" .. ipa
+    print("[KEY] Đang gửi yêu cầu lấy key...")
+    
+    local success, response = pcall(function()
+        return game:HttpGet(fullURL)
+    end)
+    
+    if success and response then
+        -- Web trả về key dạng HOANG_XXXXXXXX
+        local key = string.match(response, "HOANG_[A-Z0-9]+")
+        if key then
+            print("[KEY] ✅ Key cho thiết bị: " .. key)
+            return key
+        else
+            -- Thử tìm trong HTML nếu web trả về trang
+            key = string.match(response, "HOANG_[A-Z0-9]+")
+            if key then
+                print("[KEY] ✅ Key từ HTML: " .. key)
+                return key
+            end
+        end
+    else
+        print("[KEY] ❌ Không thể lấy key: " .. tostring(response))
+    end
+    return nil
+end
+
+-- === LƯU KEY ===
+local function saveKey(key)
+    if writefile then
+        pcall(function() writefile(KeyCacheFile .. "_key", key) end)
+    end
+end
+
+-- === TẠO UI ===
+repeat task.wait() until game:IsLoaded() and game:GetService("Players").LocalPlayer
+
+local myIPA = getDeviceIPA()
+
+-- Tạo giao diện
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KeySystemUI"
+screenGui.Parent = game:GetService("CoreGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 350, 0, 200)
+frame.Position = UDim2.new(0.5, -175, 0.5, -100)
+frame.BackgroundColor3 = Color3.fromRGB(10, 10, 25)
+frame.BackgroundTransparency = 0.05
+frame.Parent = screenGui
+local corner = Instance.new("UICorner", frame)
+corner.CornerRadius = UDim.new(0, 16)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1, 0, 0, 50)
+title.Text = "🔑 HOÀNG CODE SCRIPT"
+title.TextColor3 = Color3.fromRGB(255, 215, 0)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 20
+
+local statusLabel = Instance.new("TextLabel", frame)
+statusLabel.Size = UDim2.new(1, 0, 0, 30)
+statusLabel.Position = UDim2.new(0, 0, 0, 50)
+statusLabel.Text = "📡 Nhấn 'GET KEY' để lấy key cho thiết bị"
+statusLabel.TextColor3 = Color3.fromRGB(150, 150, 200)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Font = Enum.Font.GothamSemibold
+statusLabel.TextSize = 13
+
+local keyDisplay = Instance.new("TextBox", frame)
+keyDisplay.Size = UDim2.new(0.8, 0, 0, 45)
+keyDisplay.Position = UDim2.new(0.1, 0, 0.45, 0)
+keyDisplay.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+keyDisplay.TextColor3 = Color3.fromRGB(255, 215, 0)
+keyDisplay.Font = Enum.Font.GothamSemibold
+keyDisplay.TextSize = 14
+keyDisplay.PlaceholderText = "Key sẽ hiển thị ở đây"
+keyDisplay.Text = ""
+keyDisplay.ClearTextOnFocus = false
+local inputCorner = Instance.new("UICorner", keyDisplay)
+inputCorner.CornerRadius = UDim.new(0, 8)
+
+-- Nút GET KEY
+local getKeyBtn = Instance.new("TextButton", frame)
+getKeyBtn.Size = UDim2.new(0.35, 0, 0, 45)
+getKeyBtn.Position = UDim2.new(0.1, 0, 0.78, 0)
+getKeyBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+getKeyBtn.TextColor3 = Color3.fromRGB(10, 10, 20)
+getKeyBtn.Font = Enum.Font.GothamBold
+getKeyBtn.TextSize = 14
+getKeyBtn.Text = "⚡ GET KEY"
+local btnCorner = Instance.new("UICorner", getKeyBtn)
+btnCorner.CornerRadius = UDim.new(0, 10)
+
+-- Nút COPY
+local copyBtn = Instance.new("TextButton", frame)
+copyBtn.Size = UDim2.new(0.35, 0, 0, 45)
+copyBtn.Position = UDim2.new(0.55, 0, 0.78, 0)
+copyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+copyBtn.TextColor3 = Color3.fromRGB(200, 200, 255)
+copyBtn.Font = Enum.Font.GothamSemibold
+copyBtn.TextSize = 14
+copyBtn.Text = "📋 COPY"
+local copyCorner = Instance.new("UICorner", copyBtn)
+copyCorner.CornerRadius = UDim.new(0, 10)
+
+-- === LOGIC NÚT GET KEY ===
+getKeyBtn.MouseButton1Click:Connect(function()
+    getKeyBtn.Text = "⏳ ĐANG LẤY..."
+    getKeyBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
+    getKeyBtn.Enabled = false
+    
+    statusLabel.Text = "📡 Đang gửi yêu cầu lên web..."
+    statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+    
+    -- Gửi IPA lên web và lấy key
+    local key = fetchKeyFromWeb(myIPA)
+    
+    if key then
+        keyDisplay.Text = key
+        statusLabel.Text = "✅ Key đã sẵn sàng cho thiết bị này!"
+        statusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+        saveKey(key)
+        print("[KEY] ✅ Đã lưu key: " .. key)
+    else
+        statusLabel.Text = "❌ Không lấy được key! Kiểm tra kết nối."
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        keyDisplay.Text = "LỖI: Không lấy được key"
+    end
+    
+    getKeyBtn.Text = "⚡ GET KEY"
+    getKeyBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+    getKeyBtn.Enabled = true
+end)
+
+-- === COPY ===
+copyBtn.MouseButton1Click:Connect(function()
+    local key = keyDisplay.Text
+    if key and key ~= "" and key ~= "LỖI: Không lấy được key" then
+        if setclipboard then
+            setclipboard(key)
+            statusLabel.Text = "📋 Đã sao chép key!"
+            statusLabel.TextColor3 = Color3.fromRGB(100, 255, 200)
+            task.wait(1.5)
+            statusLabel.Text = "✅ Key đã sẵn sàng cho thiết bị này!"
+            statusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+        else
+            statusLabel.Text = "⚠️ Executor không hỗ trợ copy!"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
+        end
+    else
+        statusLabel.Text = "⚠️ Chưa có key để copy!"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+-- === KIỂM TRA KEY ĐÃ CÓ SẴN ===
+local savedKey = ""
+if readfile and isfile and isfile(KeyCacheFile .. "_key") then
+    savedKey = readfile(KeyCacheFile .. "_key") or ""
+end
+
+if savedKey and string.match(savedKey, "HOANG_[A-Z0-9]+") then
+    keyDisplay.Text = savedKey
+    statusLabel.Text = "🔑 Key đã có sẵn cho thiết bị này!"
+    statusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+    print("[KEY] 🔑 Key có sẵn: " .. savedKey)
+else
+    print("[KEY] ⏳ Chưa có key, hãy bấm GET KEY")
+end
+
+print("[KEY] ═══════════════════════════════")
+print("[KEY]   HOÀNG CODE SCRIPT")
+print("[KEY] ═══════════════════════════════")
+print("[KEY] 📡 IPA: " .. myIPA)
+print("[KEY] 🔘 Bấm 'GET KEY' để lấy key cho thiết bị này")
